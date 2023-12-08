@@ -1,0 +1,248 @@
+<!DOCTYPE html>  
+<html>
+<head>
+  <title>IBD Genetic Predisposition Network</title> 
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"> <!-- Character set specification -->
+
+  <!-- Importing JavaScript libraries -->
+  <!-- d3.js for data visualization -->
+  <script src="https://d3js.org/d3.v5.min.js"></script>
+  <!-- jQuery for AJAX requests and DOM manipulation -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+
+  <!-- CSS language for styling nodes, links, and tooltips in the graph -->
+  <style> 
+    .node { /* Styling for nodes (circle elements) in the graph */
+      fill: #42a5f5; /* Node color */
+      stroke: #fff; /* Border color of nodes */
+      stroke-width: 1.5px; /* Border width of nodes */
+      cursor: pointer; /* Cursor changes to pointer when hovering over nodes */
+    }
+
+    .link { /* Styling for links (line elements) between nodes */
+      fill: none;
+      stroke: #a0a0a0; /* Link color */
+      cursor: pointer; /* Cursor changes to pointer when hovering over links */
+    }
+
+    text { /* Styling for text elements in the graph */
+      font-family: Arial, sans-serif; /* Font family for text */
+      font-size: 13px; /* Font size */
+      pointer-events: none; /* Text does not respond to pointer events */
+    }
+
+    .tooltip { /* Styling for tooltip */
+      position: absolute; /* Absolute positioning relative to nearest positioned ancestor */
+      text-align: center; /* Center-aligned text */
+      width: auto; /* Automatic width */
+      height: auto; /* Automatic height */
+      padding: 2px; /* Padding around the tooltip */
+      font: 12px sans-serif; /* Font styling */
+      background: lightsteelblue; /* Background color */
+      border: 0px; /* No border */
+      border-radius: 8px; /* Rounded corners */
+      pointer-events: none; /* Tooltip does not respond to pointer events */
+      opacity: 0; /* Initially transparent (invisible) */
+    }
+  </style>
+</head>
+
+<body>
+  <h3>IBD Genetic Predisposition Network</h3>
+  <p>Angelica Bracchetti Practical 3006</p>
+  <!-- Description of the research question and project scope -->
+  <!-- Description and context of the project -->
+  <p>Research Question: Are any of the genetic predispositions for IBD also present in other diseases?</p>
+  <p>Explanation: This project aims to explore genetic predispositions shared between IBD and other diseases, particularly autoimmune diseases.</p>
+  <p>Network analysis: Diseases are represented as nodes, genetic predispositions as links. The size of the links correlates with the number of shared genes.</p>
+  <p>Sparql endpoint: Wikidata Query Service</p>
+
+  <!-- Visualization containers -->
+  <div id="network" style="width: 1200px; height: 800px;"></div> <!-- Graph container SVG -->
+  <div id="legend" style="display:none; border: 1px solid black; padding: 10px; margin-top: 10px;"> <!-- Legend container -->
+    <ul id="geneList"></ul>
+  </div>
+
+  <!-- JavaScript for graph creation and interaction -->
+  <script>
+    // Setting dimensions for the SVG canvas
+    var width = 1600, height = 800;
+
+    // Creating the SVG element
+    var svg = d3.select("#network").append("svg")
+        .attr("width", width)
+        .attr("height", height);
+
+    // Tooltip for displaying additional information
+    var tooltip = d3.select("body").append("div") 
+        .attr("class", "tooltip");
+
+    // Defining the force simulation for nodes and links
+    var simulation = d3.forceSimulation()
+        .force("link", d3.forceLink().distance(300).id(function(d) { return d.id; }))
+        .force("charge", d3.forceManyBody().strength(-100))
+        .force("center", d3.forceCenter(width / 2, height / 2));
+
+        var globalData = { nodes: [], links: [] };
+
+    // SPARQL query for fetching data
+
+    var sparqlQuery = `
+    SELECT ?diseaseLabel ?geneLabel ?disease2Label
+    WHERE {
+      VALUES ?disease {wd:Q1472 wd:Q1477}
+      ?gene wdt:P2293 ?disease2 .
+      ?gene wdt:P2293 ?disease .
+      FILTER (?disease != ?disease2)
+      SERVICE wikibase:label { bd:serviceParam wikibase:language "[AUTO_LANGUAGE],en" }
+    }
+    `;
+    var encodedQuery = encodeURIComponent(sparqlQuery);
+    var url = "https://query.wikidata.org/sparql?query=" + encodedQuery + "&format=json";
+
+    // Fetching and processing data from the SPARQL endpoint
+    $.getJSON(url, function(data) {
+      var nodes = [], links = []; // Arrays to store nodes and links
+      var nodeMap = {}, linkMap = {}; // Objects to map nodes and links
+
+    // Processing the results from Wikidata
+      data.results.bindings.forEach(function(binding) {
+      var disease1 = binding.diseaseLabel.value;
+      var disease2 = binding.disease2Label.value;
+      var gene = binding.geneLabel.value;
+
+        if (!nodeMap[disease1]) {
+          nodeMap[disease1] = {id: disease1};
+          nodes.push(nodeMap[disease1]);
+        }
+        if (!nodeMap[disease2]) {
+          nodeMap[disease2] = {id: disease2};
+          nodes.push(nodeMap[disease2]);
+        }
+
+        var linkKey = disease1 + "-" + disease2;
+        if (!linkMap[linkKey]) {
+          linkMap[linkKey] = {source: disease1, target: disease2, genes: [gene]};
+          links.push(linkMap[linkKey]);
+        } else {
+          linkMap[linkKey].genes.push(gene);
+        }
+      });
+
+     // Customizing specific link distance
+            links.forEach(function(link) {
+        if ((link.source === "Crohn's disease" && link.target === "Ulcerative Colitis") ||
+            (link.source === "Ulcerative Colitis" && link.target === "Crohn's disease")) {
+            link.distance = 900; // Set a longer distance for this specific link
+        }
+      });
+
+         createNetwork({nodes: nodes, links: links});
+         });
+
+    // Function to create and render the network graph
+    function createNetwork(graph) {
+            var link = svg.append("g")
+                .attr("class", "links")
+                .selectAll("line")
+                .data(graph.links)
+                .enter().append("line")
+                .attr("class", "link")
+                .style("stroke-width", function(d) { 
+                    return Math.max(1, d.genes.length * 2);
+                })
+                
+                .on("click", function(d) { 
+                // Show and update the legend with disease and gene information
+                var legend = document.getElementById('legend');
+                legend.style.display = 'block';
+                var geneList = document.getElementById('geneList');
+                geneList.innerHTML = '';
+
+                // Add 'Disease:' section
+                var diseaseItem = document.createElement('li');
+                diseaseItem.innerHTML = "<strong>Disease:</strong> " + d.source.id + " - " + d.target.id;
+                geneList.appendChild(diseaseItem);
+
+                // Add 'Gene:' section
+                if (d.genes.length > 0) {
+                    var geneHeader = document.createElement('li');
+                    geneHeader.innerHTML = "<strong>Gene:</strong> " + d.genes[0];
+                    geneList.appendChild(geneHeader);
+
+                    for (var i = 1; i < d.genes.length; i++) {
+                        var li = document.createElement('li');
+                        li.appendChild(document.createTextNode(d.genes[i]));
+                        geneList.appendChild(li);
+                    }
+                }
+            });
+
+          var node = svg.append("g")
+          .attr("class", "nodes")
+        .selectAll("g")
+        .data(graph.nodes)
+        .enter().append("g");
+
+        var circles = node.append("circle")
+          .attr("class", "node")
+          .attr("r", 10)
+          .call(d3.drag()
+              .on("start", dragstarted)
+              .on("drag", dragged)
+              .on("end", dragended));
+
+      var labels = node.append("text")
+    .text(function(d) { return d.id; })
+    .attr('x', 12)
+    .attr('y', 3)
+    .style("text-anchor", "middle") // Center align text
+    .style("alignment-baseline", "middle");
+
+      node.append("title")
+          .text(function(d) { return d.id; });
+
+          simulation
+          .nodes(graph.nodes)
+          .on("tick", ticked);
+
+      simulation.force("link")
+          .links(graph.links);
+
+          function ticked() {
+        link
+            .attr("x1", function(d) { return d.source.x; })
+            .attr("y1", function(d) { return d.source.y; })
+            .attr("x2", function(d) { return d.target.x; })
+            .attr("y2", function(d) { return d.target.y; });
+
+            node
+                .attr("transform", function(d) {
+                  // Keep the nodes within the bounds of the SVG
+                  d.x = Math.max(10, Math.min(width - 10, d.x));
+                  d.y = Math.max(10, Math.min(height - 10, d.y));
+                  return "translate(" + d.x + "," + d.y + ")";
+                });
+
+      }
+
+      function dragstarted(d) {
+        if (!d3.event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+
+      function dragged(d) {
+        d.fx = d3.event.x;
+        d.fy = d3.event.y;
+      }
+
+      function dragended(d) {
+        if (!d3.event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+    }
+  </script>
+</body>
+</html>
